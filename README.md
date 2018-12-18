@@ -432,7 +432,7 @@ The example below shows output.
 
 ### VERIFY CLAIM
 
-This endpoint signs a base64 encoded payload.
+This endpoint verifies that a claim was signed by a trusted issuer.
 
 | Method  | Path | Produces |
 | ------------- | ------------- | ------------- |
@@ -483,7 +483,7 @@ The example below shows output.
 
 ### VERIFY
 
-This endpoint signs a base64 encoded payload.
+This endpoint verifies a signature.
 
 | Method  | Path | Produces |
 | ------------- | ------------- | ------------- |
