@@ -1,0 +1,14 @@
+{
+  "sub": "ACBXX4MOY4AQCUN4PF77SLJCALTNSMYK5W47BRIL37QGPECQIZSNJDHH",
+  "nats": {
+    "limits": {
+      "subs": -1,
+      "conn": -1,
+      "imports": -1,
+      "exports": -1,
+      "data": -1,
+      "payload": -1,
+      "wildcards": true
+    }
+  }
+}
