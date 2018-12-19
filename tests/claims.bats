@@ -54,6 +54,33 @@
     [ "$trusted_keys" = "$account_key" ]
 }
 
+@test "import ngs account" {
+  path=$HOME"/.nkeys/synadia/accounts/ngs/ngs.nk"
+  user="$(vault write -format=json nkey/import/ngs-account path=$path | jq .data)"
+  type="$(echo $user | jq -r .type)"
+    [ "$type" = "account" ]
+}
+
+@test "import ngs user" {
+  path=$HOME"/.nkeys/synadia/accounts/ngs/users/ngs.nk"
+  account_key="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
+  user="$(vault write -format=json nkey/import/ngs-user path=$path | jq .data)"
+  user_update="$(vault write -format=json nkey/identities/ngs-user trusted_keys=$account_key | jq .data)"
+  type="$(echo $user | jq -r .type)"
+    [ "$type" = "user" ]
+}
+
+@test "create ngs user claim" {
+  issuer="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
+  subject="$(vault read -format=json nkey/identities/ngs-user | jq -r .data.public_key)"
+  token="$(vault write -format=json nkey/identities/ngs-account/sign-claim subject=$subject type="user" claims=@user.json | jq -r .data.token)"
+  response="$(vault write -format=json nkey/identities/ngs-user/verify-claim token=$token | jq .data)"
+  response_issuer="$(echo $response | jq -r .issuer)"
+  response_subject="$(echo $response | jq -r .public_key)"
+    [ "$issuer" = "$response_issuer" ]
+    [ "$subject" = "$response_subject" ]
+}
+
 @test "create account claim" {
   issuer="$(vault read -format=json nkey/identities/operator | jq -r .data.public_key)"
   subject="$(vault read -format=json nkey/identities/account | jq -r .data.public_key)"

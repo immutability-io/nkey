@@ -17,9 +17,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"regexp"
 
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
+)
+
+const (
+	// Empty is an empty string
+	Empty string = ""
 )
 
 // PrefixByteFromString returns a PrefixByte from the stringified value
@@ -105,4 +112,45 @@ func encodeClaim(claimsType, claimsData, subject string, keyPair nkeys.KeyPair) 
 		return "", err
 	}
 	return token, nil
+}
+
+var nscDecoratedRe = regexp.MustCompile(`\s*(?:(?:[-]{3,}[^\n]*[-]{3,}\n)(.+)(?:\n\s*[-]{3,}[^\n]*[-]{3,}\n))`)
+
+func credsFromNkeyFile(userFile string) (string, string, error) {
+	contents, err := ioutil.ReadFile(userFile)
+	if err != nil {
+		return "", Empty, fmt.Errorf("nats: %v", err)
+	}
+	defer wipeSlice(contents)
+
+	items := nscDecoratedRe.FindAllSubmatch(contents, -1)
+	if len(items) == 0 {
+		return "", string(contents), nil
+	}
+	// First result should be the user JWT.
+	// We copy here so that if the file contained a seed file too we wipe appropriately.
+	var jwt []byte
+	var nkey []byte
+	for i, item := range items {
+		switch i {
+		case 0:
+			if len(item) == 2 {
+				jwt = make([]byte, len(item[1]))
+				copy(jwt, item[1])
+			}
+		case 1:
+			if len(item) == 2 {
+				nkey = make([]byte, len(item[1]))
+				copy(nkey, item[1])
+			}
+		}
+	}
+	return string(jwt), string(nkey), nil
+}
+
+// Just wipe slice with 'x', for clearing contents of nkey seed file.
+func wipeSlice(buf []byte) {
+	for i := range buf {
+		buf[i] = 'x'
+	}
 }

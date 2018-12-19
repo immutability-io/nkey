@@ -243,40 +243,22 @@ func (b *backend) pathIdentitiesCreate(ctx context.Context, req *logical.Request
 	if err != nil {
 		return nil, err
 	}
-	publickey, err := pair.PublicKey()
-	if err != nil {
-		return nil, err
-	}
-	privatekey, err := pair.PrivateKey()
-	if err != nil {
-		return nil, err
-	}
-	seed, err := pair.Seed()
-	if err != nil {
-		return nil, err
-	}
-	identityJSON := &Identity{
-		PublicKey:   publickey,
-		TrustedKeys: trustedKeys,
-		PrivateKey:  string(privatekey),
-		Seed:        string(seed),
-	}
 	defer pair.Wipe()
-	entry, err := logical.StorageEntryJSON(req.Path, identityJSON)
+
+	identity, err := b.storeIdentity(ctx, req, name, pair, trustedKeys)
+	if err != nil {
+		return nil, err
+	}
+	err = b.crossReference(ctx, req, name, identity.PublicKey)
 	if err != nil {
 		return nil, err
 	}
 
-	err = req.Storage.Put(ctx, entry)
-	if err != nil {
-		return nil, err
-	}
-	b.crossReference(ctx, req, name, identityJSON.PublicKey)
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"type":         nkeys.Prefix(identityJSON.PublicKey).String(),
-			"public_key":   identityJSON.PublicKey,
-			"trusted_keys": identityJSON.TrustedKeys,
+			"type":         nkeys.Prefix(identity.PublicKey).String(),
+			"public_key":   identity.PublicKey,
+			"trusted_keys": identity.TrustedKeys,
 		},
 	}, nil
 }
@@ -426,13 +408,11 @@ func (b *backend) pathIdentitiesUpdate(ctx context.Context, req *logical.Request
 	if trustedKeysRaw, ok := data.GetOk("trusted_keys"); ok {
 		trustedKeys = trustedKeysRaw.([]string)
 	}
-	identity.TrustedKeys = trustedKeys
-	entry, err := logical.StorageEntryJSON(req.Path, identity)
+	pair, err := nkeys.FromSeed([]byte(identity.Seed))
 	if err != nil {
 		return nil, err
 	}
-
-	err = req.Storage.Put(ctx, entry)
+	identity, err = b.storeIdentity(ctx, req, name, pair, trustedKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -556,4 +536,37 @@ func (b *backend) pathVerifySignatureByName(ctx context.Context, req *logical.Re
 		},
 	}, nil
 
+}
+
+func (b *backend) storeIdentity(ctx context.Context, req *logical.Request, name string, pair nkeys.KeyPair, trustedKeys []string) (*Identity, error) {
+	publickey, err := pair.PublicKey()
+	if err != nil {
+		return nil, err
+	}
+	privatekey, err := pair.PrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	seed, err := pair.Seed()
+	if err != nil {
+		return nil, err
+	}
+	identity := &Identity{
+		PublicKey:   publickey,
+		TrustedKeys: trustedKeys,
+		PrivateKey:  string(privatekey),
+		Seed:        string(seed),
+	}
+	path := fmt.Sprintf("identities/%s", name)
+
+	entry, err := logical.StorageEntryJSON(path, identity)
+	if err != nil {
+		return nil, err
+	}
+
+	err = req.Storage.Put(ctx, entry)
+	if err != nil {
+		return nil, err
+	}
+	return identity, nil
 }

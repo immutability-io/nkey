@@ -56,6 +56,7 @@ func Backend() *backend {
 		Help: "",
 		Paths: framework.PathAppend(
 			configPaths(&b),
+			importPaths(&b),
 			namesPaths(&b),
 			keysPaths(&b),
 			identitiesPaths(&b),
