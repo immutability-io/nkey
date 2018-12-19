@@ -18,6 +18,44 @@ There is *business logic* governing the hierarchical controls on nkey identities
 
 There is *some* attempt to maintain this hierarchy via the (indirect) use of the `ExpectedPrefixes()` implementation in the `Claims` interface in [NATS JWT implementation](https://github.com/nats-io/jwt). The goal here is just to go far enough to allow Vault to protect nkeys.
 
+## Basic Client Use
+
+The expectation is that you would administer identities via Vault. A [basic CLI binding](./cli/nats.go) is available for Golang that you can then use with the [`NATS` client](https://github.com/nats-io/go-nats):
+
+```
+nc, err := nats.Connect("connect.ngs.global", cli.VaultCredentials("nkey/identities/ngs-account", "nkey/identities/ngs-user"))
+```
+
+## Examples of Usage
+
+There is a [BATS test script](./tests/claims.bat) that shows some basic Vault CLI commands to administer nkeys, and to sign and verify claims and payloads (nonces.)
+
+For example, the test to import an account nkey:
+
+```
+@test "import ngs account" {
+  path=$HOME"/.nkeys/synadia/accounts/ngs/ngs.nk"
+  user="$(vault write -format=json nkey/import/ngs-account path=$path | jq .data)"
+  type="$(echo $user | jq -r .type)"
+    [ "$type" = "account" ]
+}
+
+```
+
+This test creates a user and sets the `nkey/import/ngs-account` as the only trusted signer:
+
+```
+@test "create trusted user" {
+  account_key="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
+  user="$(vault write -format=json nkey/identities/trusted-user type=user trusted_keys=$account_key | jq .data)"
+  trusted_keys="$(echo $user | jq -r '.trusted_keys[]' | tr -d '"')"
+  type="$(echo $user | jq -r .type)"
+    [ "$type" = "user" ]
+    [ "$trusted_keys" = "$account_key" ]
+}
+
+```
+
 ## Installation
 
 [These scripts may help you install Vault and the plugin.](./helper/README.md)

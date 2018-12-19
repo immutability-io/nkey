@@ -70,6 +70,16 @@
     [ "$type" = "user" ]
 }
 
+@test "create trusted user" {
+  account_key="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
+  user="$(vault write -format=json nkey/identities/trusted-user type=user trusted_keys=$account_key | jq .data)"
+  trusted_keys="$(echo $user | jq -r '.trusted_keys[]' | tr -d '"')"
+  type="$(echo $user | jq -r .type)"
+    [ "$type" = "user" ]
+    [ "$trusted_keys" = "$account_key" ]
+}
+
+
 @test "create ngs user claim" {
   issuer="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
   subject="$(vault read -format=json nkey/identities/ngs-user | jq -r .data.public_key)"
