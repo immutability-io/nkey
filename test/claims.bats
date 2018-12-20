@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
 
+load 'test_helper/bats-support/load'
+load 'test_helper/bats-assert/load'
+load 'test_helper/bats-file/load'
+
 @test "test config" {
   config="$(vault write -format=json -f nkey/config | jq .data)"
   bound_cidr_list="$(echo $config | jq -r .bound_cidr_list)"
@@ -79,7 +83,6 @@
     [ "$trusted_keys" = "$account_key" ]
 }
 
-
 @test "create ngs user claim" {
   issuer="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
   subject="$(vault read -format=json nkey/identities/ngs-user | jq -r .data.public_key)"
@@ -89,6 +92,14 @@
   response_subject="$(echo $response | jq -r .public_key)"
     [ "$issuer" = "$response_issuer" ]
     [ "$subject" = "$response_subject" ]
+}
+
+
+@test "export ngs user creds" {
+  subject="$(vault read -format=json nkey/identities/ngs-user | jq -r .data.public_key)"
+  token="$(vault write -format=json nkey/identities/ngs-account/sign-claim subject=$subject type="user" claims=@user.json | jq -r .data.token)"
+  filename="$(vault write -format=json nkey/identities/ngs-user/export token=$token path=$(pwd) keybase="keybase:cypherhat" | jq -r .data.file)"
+  assert_file_exist $filename
 }
 
 @test "create account claim" {
