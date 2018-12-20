@@ -83,7 +83,8 @@ Vault provides a CLI that wraps the Vault REST interface. Any HTTP client (inclu
 
 * [Sign Claim](https://github.com/immutability-io/nkey/blob/master/README.md#sign-claim)
 * [Sign](https://github.com/immutability-io/nkey/blob/master/README.md#sign)
-* [Verify Claim](https://github.com/immutability-io/nkey/blob/master/README.md#verify-claim)
+* [Verify Claim (Authenticated)](https://github.com/immutability-io/nkey/blob/master/README.md#verify-claim-authenticated)
+* [Verify Claim (Unauthenticated)](https://github.com/immutability-io/nkey/blob/master/README.md#verify-claim)
 * [Verify](https://github.com/immutability-io/nkey/blob/master/README.md#verify)
 
 ### NKEY PLUGIN CONFIGURE
@@ -468,7 +469,7 @@ The example below shows output.
 }
 ```
 
-### VERIFY CLAIM
+### VERIFY CLAIM AUTHENTICATED
 
 This endpoint verifies that a claim was signed by a trusted issuer.
 
@@ -496,6 +497,55 @@ $ curl -s --cacert ~/etc/vault.d/root.crt --header "X-Vault-Token: $VAULT_TOKEN"
     --request POST \
     --data @payload.json \
     https://localhost:8200/v1/nkey/identities/account/verify-claim | jq .
+```
+
+#### Sample Response
+
+The example below shows output.
+
+```
+{
+  "request_id": "bbea337e-83e5-5710-d806-35c27b2f2c92",
+  "lease_id": "",
+  "renewable": false,
+  "lease_duration": 0,
+  "data": {
+    "issuer": "OCETMGWTA7533X7M25RJAV3JRRR3CNBJC5YNGHVHUBZD32GO3VOVW6Q7",
+    "public_key": "AA66QQ2NQZEQTEEUBNK4QBCE7MHWWVS4MFCV3J5V2ONOWIFLH7ISMPZM"
+  },
+  "wrap_info": null,
+  "warnings": null,
+  "auth": null
+}
+
+```
+### VERIFY CLAIM
+
+This endpoint verifies that a claim was signed by a trusted issuer.
+
+| Method  | Path | Produces |
+| ------------- | ------------- | ------------- |
+| `POST`  | `:mount-path/verify-claim`  | `200 application/json` |
+
+#### Parameters
+
+* `mount-path` (`string: <required>`) - Specifies the path where the plugin is mounted. This is specified as part of the URL.
+* `token` (`string: <required>`) - The `token` to be verified.
+
+#### Sample Payload
+
+```sh
+{
+    "token": "eyJ0eXAiOiJqd3QiLCJhbGciOiJlZDI1NTE5In0.eyJqdGkiOiJCRldCVUJaQzJKQVhZSUw1SVhUUU9FVlBMWFhCTEFFRDczVVZSMklHSjM2RjI3NEg3TTNBIiwiaWF0IjoxNTQ1MTYyNjgwLCJpc3MiOiJPQ0VUTUdXVEE3NTMzWDdNMjVSSkFWM0pSUlIzQ05CSkM1WU5HSFZIVUJaRDMyR08zVk9WVzZRNyIsInN1YiI6IkFBNjZRUTJOUVpFUVRFRVVCTks0UUJDRTdNSFdXVlM0TUZDVjNKNVYyT05PV0lGTEg3SVNNUFpNIiwidHlwZSI6ImFjY291bnQiLCJuYXRzIjp7ImxpbWl0cyI6eyJzdWJzIjotMSwiY29ubiI6LTEsImltcG9ydHMiOi0xLCJleHBvcnRzIjotMSwiZGF0YSI6LTEsInBheWxvYWQiOi0xLCJ3aWxkY2FyZHMiOnRydWV9fX0.gFujgXNijljcyCA5zgMd67cMdqR7uWQYb2EF5_ZDs7SCN3LGqFdz6Hmr5o_rCD4gNb7hHKJWtbpptJU_t2k_Cw"
+}
+```
+#### Sample Request
+
+```sh
+$ curl -s --cacert ~/etc/vault.d/root.crt --header "X-Vault-Token: $VAULT_TOKEN" \
+    --request POST \
+    --data @payload.json \
+    https://localhost:8200/v1/nkey/verify-claim | jq .
 ```
 
 #### Sample Response
