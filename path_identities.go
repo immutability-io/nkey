@@ -22,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hashicorp/vault/helper/pgpkeys"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 	"github.com/nats-io/jwt"
@@ -106,10 +105,6 @@ Create a JWT containing claims. Sign with identity private key.
 					Type:        framework.TypeString,
 					Default:     "generic",
 					Description: "The type of claim. Can be one of 'account','activation','user','server','cluster','operator','revocation'",
-				},
-				"keybase": &framework.FieldSchema{
-					Type:        framework.TypeString,
-					Description: "If present, the token (JWT) will be encrypted with the provided keybase identity.",
 				},
 				"claims": &framework.FieldSchema{
 					Type:        framework.TypeString,
@@ -195,9 +190,17 @@ Exports the seed and JWT to a text file at a path.
 `,
 			Fields: map[string]*framework.FieldSchema{
 				"name": &framework.FieldSchema{Type: framework.TypeString},
+				"token": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "JWT token.",
+				},
+				"keybase": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "If present, the file will be encrypted with the provided keybase identity.",
+				},
 				"path": &framework.FieldSchema{
 					Type:        framework.TypeString,
-					Description: "Directory to export the seed and JWT into - must be an absolute path.",
+					Description: "Directory to export the seed (and JWT) into - must be an absolute path.",
 				},
 			},
 			ExistenceCheck: b.pathExistenceCheck,
@@ -312,6 +315,8 @@ func (b *backend) pathExportCreate(ctx context.Context, req *logical.Request, da
 	}
 	name := data.Get("name").(string)
 	path := data.Get("path").(string)
+	keybaseIdentity := data.Get("keybase").(string)
+	token := data.Get("token").(string)
 	identity, err := b.readIdentity(ctx, req, name)
 	if err != nil {
 		return nil, fmt.Errorf("Error reading identity")
@@ -323,13 +328,40 @@ func (b *backend) pathExportCreate(ctx context.Context, req *logical.Request, da
 	if err != nil {
 		return nil, err
 	}
-	err = ioutil.WriteFile(filepath.Join(path, name+".nk"), []byte(identity.Seed), 0644)
+	var contents []byte
+	filename := name
+	fingerprint := "none"
+	if token == "" {
+		filename += ".nk"
+		if keybaseIdentity != "" {
+			filename += ".enc"
+			fingerprint, contents, err = keybaseEncrypt(keybaseIdentity, []byte(identity.Seed))
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			contents = []byte(identity.Seed)
+		}
+	} else {
+		filename += ".creds"
+		if keybaseIdentity != "" {
+			filename += ".enc"
+			fingerprint, contents, err = keybaseEncrypt(keybaseIdentity, getCredsFile(identity.Seed, token))
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			contents = getCredsFile(identity.Seed, token)
+		}
+	}
+	err = ioutil.WriteFile(filepath.Join(path, filename), contents, 0644)
 	if err != nil {
 		return nil, err
 	}
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"file": filepath.Join(path, name+".nk"),
+			"file":            filepath.Join(path, filename),
+			"pgp_fingerprint": fingerprint,
 		},
 	}, nil
 }
@@ -378,35 +410,6 @@ func (b *backend) pathSignClaim(ctx context.Context, req *logical.Request, data 
 	token, err := encodeClaim(claimsType, claimsData, subject, keyPair)
 	if err != nil {
 		return nil, err
-	}
-	keybaseIdentity := data.Get("keybase").(string)
-	if keybaseIdentity != "" {
-		keybaseKeys := make([]string, 1)
-		keybaseKeys = append(keybaseKeys, keybaseIdentity)
-		b.Logger().Info(fmt.Sprintf("FetchKeybasePubkeys %v\n", keybaseKeys))
-		pgpKeys, err := pgpkeys.FetchKeybasePubkeys(keybaseKeys)
-		if err != nil {
-			return nil, err
-		}
-		if pgpKeys != nil {
-			keybasePgpKeys := make([]string, 1)
-			for _, pgpKey := range pgpKeys {
-				keybasePgpKeys = append(keybasePgpKeys, pgpKey)
-			}
-			b.Logger().Info(fmt.Sprintf("EncryptToken %s with %v\n", token, keybasePgpKeys))
-			fingerprint, encrypted, err := EncryptToken([]byte(token), keybasePgpKeys)
-			if err != nil {
-				return nil, err
-			}
-			return &logical.Response{
-				Data: map[string]interface{}{
-					"token":       encrypted,
-					"fingerprint": fingerprint,
-					"type":        claimsType,
-					"public_key":  identity.PublicKey,
-				},
-			}, nil
-		}
 	}
 	return &logical.Response{
 		Data: map[string]interface{}{

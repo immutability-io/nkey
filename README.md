@@ -28,7 +28,7 @@ nc, err := nats.Connect("connect.ngs.global", cli.VaultCredentials("nkey/identit
 
 ## Examples of Usage
 
-There is a [BATS test script](./tests/claims.bat) that shows some basic Vault CLI commands to administer nkeys, and to sign and verify claims and payloads (nonces.)
+There is a [BATS test script](./test/claims.bat) that shows some basic Vault CLI commands to administer nkeys, and to sign and verify claims and payloads (nonces.)
 
 For example, the test to import an account nkey:
 
@@ -103,7 +103,7 @@ This endpoint will allow you to whitelist the IPs that are allowed to interact w
 
 ```sh
 {
-    "path":"/Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/tests"
+    "path":"/Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/test"
 }
 ```
 
@@ -326,7 +326,7 @@ This endpoint will export a JSON Keystore for use in another wallet.
 
 ```sh
 {
-    "path":"/Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/tests"
+    "path":"/Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/test"
 }
 ```
 #### Sample Request
@@ -349,7 +349,7 @@ The example below shows output for the successful export of the keystore for `/n
   "renewable": false,
   "lease_duration": 0,
   "data": {
-    "file": "/Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/tests/operator.nk"
+    "file": "/Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/test/operator.nk"
   },
   "wrap_info": null,
   "warnings": null,
@@ -360,7 +360,7 @@ The example below shows output for the successful export of the keystore for `/n
 #### File Contents
 
 ```sh
-$ cat /Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/tests/operator.nk
+$ cat /Users/cypherhat/go/src/github.com/immutability-io/vault-nkey/test/operator.nk
 SOAMZFV6VS3X7CWRUL6FDLXHNXWWIBFUWA6YQ5OACIL3I55O2H4YUIYUEM%
 ```
 

@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,8 +23,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/keybase/go-crypto/openpgp"
-	"github.com/keybase/go-crypto/openpgp/packet"
+	"github.com/hashicorp/vault/helper/pgpkeys"
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
 )
@@ -33,6 +31,16 @@ import (
 const (
 	// Empty is an empty string
 	Empty string = ""
+	// JWTBoundary is an empty string
+	JWTBoundary string = "NATS USER JWT"
+	// SeedBoundary is an empty string
+	SeedBoundary string = "USER NKEY SEED"
+	// BoundaryFormat is a printf string
+	BoundaryFormat string = "-----%s %s-----\n"
+	// Begin is the begin boundary
+	Begin string = "BEGIN"
+	// End is the end boundary
+	End string = "END"
 )
 
 // PrefixByteFromString returns a PrefixByte from the stringified value
@@ -161,72 +169,6 @@ func wipeSlice(buf []byte) {
 	}
 }
 
-// EncryptToken will encrypt the input
-func EncryptToken(input []byte, pgpKeys []string) (string, []byte, error) {
-	var encryptedToken []byte
-	entities, err := GetEntities(pgpKeys)
-	if err != nil {
-		return "", nil, err
-	}
-	for _, entity := range entities {
-		ctBuf := bytes.NewBuffer(nil)
-		pt, err := openpgp.Encrypt(ctBuf, []*openpgp.Entity{entity}, nil, nil, nil)
-		if err != nil {
-			return "", nil, fmt.Errorf("error setting up encryption for PGP message: %s", err)
-		}
-		_, err = pt.Write(input)
-		if err != nil {
-			return "", nil, fmt.Errorf("error encrypting PGP message: %s", err)
-		}
-		pt.Close()
-		encryptedToken = ctBuf.Bytes()
-	}
-
-	fingerprints, err := GetFingerprints(nil, entities)
-	if err != nil {
-		return "", nil, err
-	}
-
-	return fingerprints[0], encryptedToken, nil
-}
-
-// GetEntities takes in a string array of base64-encoded PGP keys and returns
-// the openpgp Entities
-func GetEntities(pgpKeys []string) ([]*openpgp.Entity, error) {
-	ret := make([]*openpgp.Entity, 0, len(pgpKeys))
-	for _, keystring := range pgpKeys {
-		data, err := base64.StdEncoding.DecodeString(keystring)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding given PGP key: %s", err)
-		}
-		entity, err := openpgp.ReadEntity(packet.NewReader(bytes.NewBuffer(data)))
-		if err != nil {
-			return nil, fmt.Errorf("error parsing given PGP key: %s", err)
-		}
-		ret = append(ret, entity)
-	}
-	return ret, nil
-}
-
-// GetFingerprints takes in a list of openpgp Entities and returns the
-// fingerprints. If entities is nil, it will instead parse both entities and
-// fingerprints from the pgpKeys string slice.
-func GetFingerprints(pgpKeys []string, entities []*openpgp.Entity) ([]string, error) {
-	if entities == nil {
-		var err error
-		entities, err = GetEntities(pgpKeys)
-
-		if err != nil {
-			return nil, err
-		}
-	}
-	ret := make([]string, 0, len(entities))
-	for _, entity := range entities {
-		ret = append(ret, fmt.Sprintf("%x", entity.PrimaryKey.Fingerprint))
-	}
-	return ret, nil
-}
-
 func parseClaims(s string, target jwt.Claims) error {
 	h, err := decodeString(s)
 	if err != nil {
@@ -282,4 +224,42 @@ func parseHeaders(s string) (*jwt.Header, error) {
 		return nil, err
 	}
 	return &header, nil
+}
+
+func formatFingerprint(fingerprint string) string {
+	return fmt.Sprintf("%s %s %s %s", strings.ToUpper(fingerprint[24:])[0:4],
+		strings.ToUpper(fingerprint[24:])[4:8],
+		strings.ToUpper(fingerprint[24:])[8:12],
+		strings.ToUpper(fingerprint[24:])[12:16])
+}
+
+func keybaseEncrypt(keybaseIdentity string, payload []byte) (string, []byte, error) {
+	plaintextes := make([][]byte, 0)
+	plaintextes = append(plaintextes, payload)
+	pgpKeys := make([]string, 0)
+	pgpKeys = append(pgpKeys, keybaseIdentity)
+	pgpKeysFetched, err := pgpkeys.FetchKeybasePubkeys(pgpKeys)
+	if err != nil {
+		return "", nil, err
+	}
+	keys := make([]string, 0)
+	for _, fetched := range pgpKeysFetched {
+		keys = append(keys, fetched)
+	}
+	fingerprints, ciphertextes, err := pgpkeys.EncryptShares(plaintextes, keys)
+	if err != nil {
+		return "", nil, err
+	}
+	return formatFingerprint(fingerprints[0]), ciphertextes[0], nil
+}
+
+func getCredsFile(seed, token string) []byte {
+	contents := fmt.Sprintf(BoundaryFormat, Begin, JWTBoundary) +
+		fmt.Sprintf("%s\n", token) +
+		fmt.Sprintf(BoundaryFormat, End, JWTBoundary) +
+		fmt.Sprintf(BoundaryFormat, Begin, SeedBoundary) +
+		fmt.Sprintf("%s\n", seed) +
+		fmt.Sprintf(BoundaryFormat, End, SeedBoundary)
+	return []byte(contents)
+
 }
