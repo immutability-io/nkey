@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hashicorp/vault/helper/pgpkeys"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 	"github.com/nats-io/jwt"
@@ -105,6 +106,10 @@ Create a JWT containing claims. Sign with identity private key.
 					Type:        framework.TypeString,
 					Default:     "generic",
 					Description: "The type of claim. Can be one of 'account','activation','user','server','cluster','operator','revocation'",
+				},
+				"keybase": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "If present, the token (JWT) will be encrypted with the provided keybase identity.",
 				},
 				"claims": &framework.FieldSchema{
 					Type:        framework.TypeString,
@@ -374,7 +379,35 @@ func (b *backend) pathSignClaim(ctx context.Context, req *logical.Request, data 
 	if err != nil {
 		return nil, err
 	}
-
+	keybaseIdentity := data.Get("keybase").(string)
+	if keybaseIdentity != "" {
+		keybaseKeys := make([]string, 1)
+		keybaseKeys = append(keybaseKeys, keybaseIdentity)
+		b.Logger().Info(fmt.Sprintf("FetchKeybasePubkeys %v\n", keybaseKeys))
+		pgpKeys, err := pgpkeys.FetchKeybasePubkeys(keybaseKeys)
+		if err != nil {
+			return nil, err
+		}
+		if pgpKeys != nil {
+			keybasePgpKeys := make([]string, 1)
+			for _, pgpKey := range pgpKeys {
+				keybasePgpKeys = append(keybasePgpKeys, pgpKey)
+			}
+			b.Logger().Info(fmt.Sprintf("EncryptToken %s with %v\n", token, keybasePgpKeys))
+			fingerprint, encrypted, err := EncryptToken([]byte(token), keybasePgpKeys)
+			if err != nil {
+				return nil, err
+			}
+			return &logical.Response{
+				Data: map[string]interface{}{
+					"token":       encrypted,
+					"fingerprint": fingerprint,
+					"type":        claimsType,
+					"public_key":  identity.PublicKey,
+				},
+			}, nil
+		}
+	}
 	return &logical.Response{
 		Data: map[string]interface{}{
 			"token":      token,

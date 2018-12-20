@@ -57,6 +57,7 @@ func Backend() *backend {
 		Paths: framework.PathAppend(
 			configPaths(&b),
 			importPaths(&b),
+			verifyPaths(&b),
 			namesPaths(&b),
 			keysPaths(&b),
 			identitiesPaths(&b),
@@ -65,7 +66,7 @@ func Backend() *backend {
 			Unauthenticated: []string{
 				"keys/*",
 				"names/*",
-				"verify",
+				"verify-claims",
 			},
 			SealWrapStorage: []string{
 				"identities/",
