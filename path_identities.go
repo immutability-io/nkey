@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
+	"github.com/immutability-io/nkey/util"
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
 )
@@ -392,12 +393,12 @@ func (b *backend) pathExportCreate(ctx context.Context, req *logical.Request, da
 		filename += ".creds"
 		if keybaseIdentity != "" {
 			filename += ".enc"
-			fingerprint, contents, err = keybaseEncrypt(keybaseIdentity, getCredsFile(identity.Seed, token, identity.EncryptionPrivateKey))
+			fingerprint, contents, err = keybaseEncrypt(keybaseIdentity, buildCredsFile(identity.Seed, token, identity.EncryptionPrivateKey))
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			contents = getCredsFile(identity.Seed, token, identity.EncryptionPrivateKey)
+			contents = buildCredsFile(identity.Seed, token, identity.EncryptionPrivateKey)
 		}
 	}
 	err = ioutil.WriteFile(filepath.Join(path, filename), contents, 0644)
@@ -696,7 +697,7 @@ func (b *backend) pathDecrypt(ctx context.Context, req *logical.Request, data *f
 	if ciphertext == "" {
 		return nil, fmt.Errorf("ciphertext is required")
 	}
-	plaintext, err := decrypt(identity.EncryptionPrivateKey, ciphertext)
+	plaintext, err := util.Decrypt(identity.EncryptionPrivateKey, ciphertext)
 	if err != nil {
 		return nil, err
 	}
@@ -723,7 +724,7 @@ func (b *backend) pathEncrypt(ctx context.Context, req *logical.Request, data *f
 	if plaintext == "" {
 		return nil, fmt.Errorf("plaintext is required")
 	}
-	ciphertext, err := encrypt(identity.EncryptionPublicKey, plaintext)
+	ciphertext, err := util.Encrypt(identity.EncryptionPublicKey, plaintext)
 	if err != nil {
 		return nil, err
 	}

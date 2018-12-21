@@ -193,3 +193,9 @@ load 'test_helper/bats-file/load'
     [ "$type" = "user" ]
 }
 
+@test "export user creds unencrypted" {
+  subject="$(vault read -format=json nkey/identities/user | jq -r .data.public_key)"
+  token="$(vault write -format=json nkey/identities/account/sign-claim subject=$subject type="user" claims=@user.json | jq -r .data.token)"
+  filename="$(vault write -format=json nkey/identities/user/export token=$token path=$(pwd)  | jq -r .data.file)"
+  assert_file_exist $filename
+}

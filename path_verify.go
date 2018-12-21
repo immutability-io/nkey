@@ -21,6 +21,7 @@ import (
 
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
+	"github.com/immutability-io/nkey/util"
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
 )
@@ -173,7 +174,7 @@ func (b *backend) pathEncryptSimple(ctx context.Context, req *logical.Request, d
 	if plaintext == Empty {
 		return nil, fmt.Errorf("plaintext is required")
 	}
-	ciphertext, err := encrypt(publicKey, plaintext)
+	ciphertext, err := util.Encrypt(publicKey, plaintext)
 	if err != nil {
 		return nil, err
 	}

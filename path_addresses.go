@@ -20,6 +20,7 @@ import (
 
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
+	"github.com/immutability-io/nkey/util"
 )
 
 // AccountPublicKey stores the name of the identity to allow reverse lookup by publickey
@@ -316,7 +317,7 @@ func (b *backend) pathPublicKeysEncrypt(ctx context.Context, req *logical.Reques
 	if plaintext == "" {
 		return nil, fmt.Errorf("plaintext is required")
 	}
-	ciphertext, err := encrypt(identity.EncryptionPublicKey, plaintext)
+	ciphertext, err := util.Encrypt(identity.EncryptionPublicKey, plaintext)
 	if err != nil {
 		return nil, err
 	}

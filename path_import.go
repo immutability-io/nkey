@@ -20,6 +20,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 
+	"github.com/immutability-io/nkey/util"
 	"github.com/nats-io/nkeys"
 
 	"github.com/hashicorp/vault/logical"
@@ -93,7 +94,7 @@ func (b *backend) pathImportCreate(ctx context.Context, req *logical.Request, da
 			}
 
 		case TypeCreds:
-			_, seed, err := credsFromNkeyFile(keystorePath)
+			_, seed, _, err := util.CredsFromNkeyFile(keystorePath)
 			if err != nil {
 				return nil, err
 			}

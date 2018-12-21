@@ -17,15 +17,11 @@ package main
 import (
 	"crypto/ecdsa"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"regexp"
 	"strings"
 
-	"github.com/btcsuite/btcd/btcec"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/hashicorp/vault/helper/pgpkeys"
@@ -138,47 +134,6 @@ func encodeClaim(claimsType, claimsData, subject, name string, keyPair nkeys.Key
 	return token, nil
 }
 
-var nscDecoratedRe = regexp.MustCompile(`\s*(?:(?:[-]{3,}[^\n]*[-]{3,}\n)(.+)(?:\n\s*[-]{3,}[^\n]*[-]{3,}\n))`)
-
-func credsFromNkeyFile(userFile string) (string, string, error) {
-	contents, err := ioutil.ReadFile(userFile)
-	if err != nil {
-		return "", Empty, fmt.Errorf("nats: %v", err)
-	}
-	defer wipeSlice(contents)
-
-	items := nscDecoratedRe.FindAllSubmatch(contents, -1)
-	if len(items) == 0 {
-		return "", string(contents), nil
-	}
-	// First result should be the user JWT.
-	// We copy here so that if the file contained a seed file too we wipe appropriately.
-	var jwt []byte
-	var nkey []byte
-	for i, item := range items {
-		switch i {
-		case 0:
-			if len(item) == 2 {
-				jwt = make([]byte, len(item[1]))
-				copy(jwt, item[1])
-			}
-		case 1:
-			if len(item) == 2 {
-				nkey = make([]byte, len(item[1]))
-				copy(nkey, item[1])
-			}
-		}
-	}
-	return string(jwt), string(nkey), nil
-}
-
-// Just wipe slice with 'x', for clearing contents of nkey seed file.
-func wipeSlice(buf []byte) {
-	for i := range buf {
-		buf[i] = 'x'
-	}
-}
-
 func parseClaims(s string, target jwt.Claims) error {
 	h, err := decodeString(s)
 	if err != nil {
@@ -263,7 +218,7 @@ func keybaseEncrypt(keybaseIdentity string, payload []byte) (string, []byte, err
 	return formatFingerprint(fingerprints[0]), ciphertextes[0], nil
 }
 
-func getCredsFile(seed, token, privateKey string) []byte {
+func buildCredsFile(seed, token, privateKey string) []byte {
 	contents := fmt.Sprintf(BoundaryFormat, Begin, JWTBoundary) +
 		fmt.Sprintf("%s\n", token) +
 		fmt.Sprintf(BoundaryFormat, End, JWTBoundary) +
@@ -293,39 +248,4 @@ func createEncryptionKey() string {
 	privateKeyString := hexutil.Encode(privateKeyBytes)[2:]
 
 	return privateKeyString
-}
-
-func encrypt(publicKeyString, plaintext string) (string, error) {
-	publicKeyBytes, err := hex.DecodeString(publicKeyString)
-	if err != nil {
-		return Empty, err
-	}
-
-	pubKey, err := btcec.ParsePubKey(publicKeyBytes, btcec.S256())
-	if err != nil {
-		return Empty, err
-	}
-
-	// Encrypt a message decryptable by the private key corresponding to pubKey
-	ciphertextBytes, err := btcec.Encrypt(pubKey, []byte(plaintext))
-	if err != nil {
-		return Empty, err
-	}
-	ciphertext := hex.EncodeToString(ciphertextBytes)
-	return ciphertext, nil
-}
-
-func decrypt(privateKeyString, ciphertext string) (string, error) {
-	// Decode the hex-encoded private key.
-	pkBytes, err := hex.DecodeString(privateKeyString)
-	if err != nil {
-		return Empty, err
-	}
-	// note that we already have corresponding pubKey
-	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), pkBytes)
-	ciphertextBytes, err := hex.DecodeString(ciphertext)
-	// Try decrypting and verify if it's the same message.
-	plaintextBytes, err := btcec.Decrypt(privKey, ciphertextBytes)
-	plaintext := string(plaintextBytes)
-	return plaintext, nil
 }
