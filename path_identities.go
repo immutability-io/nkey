@@ -17,11 +17,14 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 	"github.com/nats-io/jwt"
@@ -30,10 +33,11 @@ import (
 
 // Identity is a trusted entity in vault.
 type Identity struct {
-	Seed        string   `json:"seed"`
-	PublicKey   string   `json:"public_key"`
-	PrivateKey  string   `json:"private_key"`
-	TrustedKeys []string `json:"trusted_keys_list" structs:"trusted_keys" mapstructure:"trusted_keys"`
+	Seed                 string   `json:"seed"`
+	PublicKey            string   `json:"public_key"`
+	EncryptionPrivateKey string   `json:"private_key"`
+	EncryptionPublicKey  string   `json:"encryption_key"`
+	TrustedKeys          []string `json:"trusted_keys_list" structs:"trusted_keys" mapstructure:"trusted_keys"`
 }
 
 // IdentityName stores the name of the identity to allow reverse lookup by publickey
@@ -181,6 +185,47 @@ Verifies a signature.
 			},
 		},
 		&framework.Path{
+			Pattern:      "identities/" + framework.GenericNameRegex("name") + "/encrypt",
+			HelpSynopsis: "Encrypts plaintext.",
+			HelpDescription: `
+
+Encrypts plaintext.
+
+`,
+			Fields: map[string]*framework.FieldSchema{
+				"name": &framework.FieldSchema{Type: framework.TypeString},
+				"plaintext": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "The base64 encoded data to encrypt.",
+				},
+			},
+			ExistenceCheck: b.pathExistenceCheck,
+			Callbacks: map[logical.Operation]framework.OperationFunc{
+				logical.CreateOperation: b.pathEncrypt,
+			},
+		},
+		&framework.Path{
+			Pattern:      "identities/" + framework.GenericNameRegex("name") + "/decrypt",
+			HelpSynopsis: "Decrypts ciphertext.",
+			HelpDescription: `
+
+Verifies a signature.
+
+`,
+			Fields: map[string]*framework.FieldSchema{
+				"name": &framework.FieldSchema{Type: framework.TypeString},
+				"ciphertext": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "The base64 encoded data to decrypt.",
+				},
+			},
+			ExistenceCheck: b.pathExistenceCheck,
+			Callbacks: map[logical.Operation]framework.OperationFunc{
+				logical.CreateOperation: b.pathDecrypt,
+			},
+		},
+
+		&framework.Path{
 			Pattern:      "identities/" + framework.GenericNameRegex("name") + "/export",
 			HelpSynopsis: "Exports the seed and JWT to a text file at a path.",
 			HelpDescription: `
@@ -229,9 +274,10 @@ func (b *backend) pathIdentitiesRead(ctx context.Context, req *logical.Request, 
 	// Return the secret
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"type":         nkeys.Prefix(identity.PublicKey).String(),
-			"trusted_keys": identity.TrustedKeys,
-			"public_key":   identity.PublicKey,
+			"type":           nkeys.Prefix(identity.PublicKey).String(),
+			"trusted_keys":   identity.TrustedKeys,
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
 		},
 	}, nil
 }
@@ -252,8 +298,7 @@ func (b *backend) pathIdentitiesCreate(ctx context.Context, req *logical.Request
 		return nil, err
 	}
 	defer pair.Wipe()
-
-	identity, err := b.storeIdentity(ctx, req, name, pair, trustedKeys)
+	identity, err := b.storeIdentity(ctx, req, name, pair, createEncryptionKey(), trustedKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -264,9 +309,10 @@ func (b *backend) pathIdentitiesCreate(ctx context.Context, req *logical.Request
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"type":         nkeys.Prefix(identity.PublicKey).String(),
-			"public_key":   identity.PublicKey,
-			"trusted_keys": identity.TrustedKeys,
+			"type":           nkeys.Prefix(identity.PublicKey).String(),
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
+			"trusted_keys":   identity.TrustedKeys,
 		},
 	}, nil
 }
@@ -346,12 +392,12 @@ func (b *backend) pathExportCreate(ctx context.Context, req *logical.Request, da
 		filename += ".creds"
 		if keybaseIdentity != "" {
 			filename += ".enc"
-			fingerprint, contents, err = keybaseEncrypt(keybaseIdentity, getCredsFile(identity.Seed, token))
+			fingerprint, contents, err = keybaseEncrypt(keybaseIdentity, getCredsFile(identity.Seed, token, identity.EncryptionPrivateKey))
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			contents = getCredsFile(identity.Seed, token)
+			contents = getCredsFile(identity.Seed, token, identity.EncryptionPrivateKey)
 		}
 	}
 	err = ioutil.WriteFile(filepath.Join(path, filename), contents, 0644)
@@ -403,19 +449,37 @@ func (b *backend) pathSignClaim(ctx context.Context, req *logical.Request, data 
 
 	claimsType := data.Get("type").(string)
 	subject := data.Get("subject").(string)
+	subjectName := "anonymous"
+	if subject == "" {
+		claims := &jwt.GenericClaims{}
+		err = json.Unmarshal([]byte(claimsData), claims)
+		if err != nil {
+			return nil, err
+		}
+		if claims.Claims().Subject == "" {
+			return nil, fmt.Errorf("subject is required")
+		}
+		subject = claims.Claims().Subject
+	}
+	subjectIdentity, err := b.readPublicKey(ctx, req, subject)
+	if err == nil && subjectIdentity != nil && len(subjectIdentity.Names) > 0 {
+		subjectName = subjectIdentity.Names[0]
+	}
 	keyPair, err := nkeys.FromSeed([]byte(identity.Seed))
 	if err != nil {
 		return nil, err
 	}
-	token, err := encodeClaim(claimsType, claimsData, subject, keyPair)
+	token, err := encodeClaim(claimsType, claimsData, subject, subjectName, keyPair)
 	if err != nil {
 		return nil, err
 	}
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"token":      token,
-			"type":       claimsType,
-			"public_key": identity.PublicKey,
+			"token":          token,
+			"name":           subjectName,
+			"type":           claimsType,
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
 		},
 	}, nil
 }
@@ -445,18 +509,20 @@ func (b *backend) pathIdentitiesUpdate(ctx context.Context, req *logical.Request
 		trustedKeys = trustedKeysRaw.([]string)
 	}
 	pair, err := nkeys.FromSeed([]byte(identity.Seed))
+	defer pair.Wipe()
 	if err != nil {
 		return nil, err
 	}
-	identity, err = b.storeIdentity(ctx, req, name, pair, trustedKeys)
+	identity, err = b.storeIdentity(ctx, req, name, pair, identity.EncryptionPrivateKey, trustedKeys)
 	if err != nil {
 		return nil, err
 	}
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"type":         nkeys.Prefix(identity.PublicKey).String(),
-			"trusted_keys": identity.TrustedKeys,
-			"public_key":   identity.PublicKey,
+			"type":           nkeys.Prefix(identity.PublicKey).String(),
+			"trusted_keys":   identity.TrustedKeys,
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
 		},
 	}, nil
 }
@@ -505,8 +571,9 @@ func (b *backend) pathVerifyClaimByName(ctx context.Context, req *logical.Reques
 	}
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"issuer":     claims.Issuer,
-			"public_key": identity.PublicKey,
+			"issuer":         claims.Issuer,
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
 		},
 	}, nil
 
@@ -537,8 +604,9 @@ func (b *backend) pathSign(ctx context.Context, req *logical.Request, data *fram
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"signature":  base64.StdEncoding.EncodeToString(signature),
-			"public_key": identity.PublicKey,
+			"signature":      base64.StdEncoding.EncodeToString(signature),
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
 		},
 	}, nil
 }
@@ -568,18 +636,15 @@ func (b *backend) pathVerifySignatureByName(ctx context.Context, req *logical.Re
 
 	return &logical.Response{
 		Data: map[string]interface{}{
-			"public_key": identity.PublicKey,
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
 		},
 	}, nil
 
 }
 
-func (b *backend) storeIdentity(ctx context.Context, req *logical.Request, name string, pair nkeys.KeyPair, trustedKeys []string) (*Identity, error) {
+func (b *backend) storeIdentity(ctx context.Context, req *logical.Request, name string, pair nkeys.KeyPair, privateKeyString string, trustedKeys []string) (*Identity, error) {
 	publickey, err := pair.PublicKey()
-	if err != nil {
-		return nil, err
-	}
-	privatekey, err := pair.PrivateKey()
 	if err != nil {
 		return nil, err
 	}
@@ -587,11 +652,21 @@ func (b *backend) storeIdentity(ctx context.Context, req *logical.Request, name 
 	if err != nil {
 		return nil, err
 	}
+	privateKey, err := crypto.HexToECDSA(privateKeyString)
+	if err != nil {
+		return nil, err
+	}
+	defer zeroKey(privateKey)
+
+	publicKeyBytes := crypto.FromECDSAPub(&privateKey.PublicKey)
+	publicKeyString := hex.EncodeToString(publicKeyBytes)
+
 	identity := &Identity{
-		PublicKey:   publickey,
-		TrustedKeys: trustedKeys,
-		PrivateKey:  string(privatekey),
-		Seed:        string(seed),
+		PublicKey:            publickey,
+		EncryptionPrivateKey: privateKeyString,
+		EncryptionPublicKey:  publicKeyString,
+		TrustedKeys:          trustedKeys,
+		Seed:                 string(seed),
 	}
 	path := fmt.Sprintf("identities/%s", name)
 
@@ -605,4 +680,58 @@ func (b *backend) storeIdentity(ctx context.Context, req *logical.Request, name 
 		return nil, err
 	}
 	return identity, nil
+}
+
+func (b *backend) pathDecrypt(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	_, err := b.configured(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	name := data.Get("name").(string)
+	identity, err := b.readIdentity(ctx, req, name)
+	if err != nil {
+		return nil, err
+	}
+	ciphertext := data.Get("ciphertext").(string)
+	if ciphertext == "" {
+		return nil, fmt.Errorf("ciphertext is required")
+	}
+	plaintext, err := decrypt(identity.EncryptionPrivateKey, ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	return &logical.Response{
+		Data: map[string]interface{}{
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
+			"plaintext":      plaintext,
+		},
+	}, nil
+}
+
+func (b *backend) pathEncrypt(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	_, err := b.configured(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	name := data.Get("name").(string)
+	identity, err := b.readIdentity(ctx, req, name)
+	if err != nil {
+		return nil, err
+	}
+	plaintext := data.Get("plaintext").(string)
+	if plaintext == "" {
+		return nil, fmt.Errorf("plaintext is required")
+	}
+	ciphertext, err := encrypt(identity.EncryptionPublicKey, plaintext)
+	if err != nil {
+		return nil, err
+	}
+	return &logical.Response{
+		Data: map[string]interface{}{
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
+			"ciphertext":     ciphertext,
+		},
+	}, nil
 }

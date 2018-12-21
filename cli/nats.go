@@ -33,7 +33,6 @@ func basicUserJWTHandler(accountPath, userPath string) (string, error) {
 	if secret == nil {
 		return "", fmt.Errorf("problem writing claim")
 	}
-
 	return secret.Data["token"].(string), nil
 }
 
@@ -49,7 +48,7 @@ func basicSignatureHandler(nonce []byte, path string) ([]byte, error) {
 		return nil, err
 	}
 	if secret == nil {
-		return nil, fmt.Errorf("problem writing claim")
+		return nil, fmt.Errorf("problem signing nonce")
 	}
 	signature := secret.Data["signature"].(string)
 	signatureBytes, err := base64.StdEncoding.DecodeString(signature)

@@ -3,3 +3,6 @@
 .DS_Store
 **/.DS_Store
 **/test/*.enc
+**/test/*.creds
+**/test/*.nk
+**/test/users.bats

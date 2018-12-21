@@ -74,6 +74,25 @@ Verifies and validates a JWT token
 			},
 		},
 		&framework.Path{
+			Pattern:      "keys/" + framework.GenericNameRegex("name") + "/encrypt",
+			HelpSynopsis: "Encrypts data.",
+			HelpDescription: `
+
+Encrypts data.
+`,
+			Fields: map[string]*framework.FieldSchema{
+				"name": &framework.FieldSchema{Type: framework.TypeString},
+				"plaintext": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "The data to encrypt",
+				},
+			},
+			ExistenceCheck: b.pathExistenceCheck,
+			Callbacks: map[logical.Operation]framework.OperationFunc{
+				logical.UpdateOperation: b.pathPublicKeysEncrypt,
+			},
+		},
+		&framework.Path{
 			Pattern:      "keys/" + framework.GenericNameRegex("key") + "/verify",
 			HelpSynopsis: "Verify that data was signed by a particular public key.",
 			HelpDescription: `
@@ -266,4 +285,47 @@ func (b *backend) removeCrossReference(ctx context.Context, req *logical.Request
 		return err
 	}
 	return nil
+}
+
+func (b *backend) pathPublicKeysEncrypt(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	_, err := b.configured(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	publickey := data.Get("key").(string)
+	accountNames, err := b.readPublicKey(ctx, req, publickey)
+	if err != nil {
+		return nil, err
+	}
+
+	if accountNames == nil {
+		return nil, nil
+	}
+	if len(accountNames.Names) == 0 {
+		return nil, nil
+	}
+	identity, err := b.readIdentity(ctx, req, accountNames.Names[0])
+	if err != nil {
+		return nil, fmt.Errorf("error reading identity")
+	}
+	if identity == nil {
+		return nil, nil
+	}
+	plaintext := data.Get("plaintext").(string)
+	if plaintext == "" {
+		return nil, fmt.Errorf("plaintext is required")
+	}
+	ciphertext, err := encrypt(identity.EncryptionPublicKey, plaintext)
+	if err != nil {
+		return nil, err
+	}
+	return &logical.Response{
+		Data: map[string]interface{}{
+			"public_key":     identity.PublicKey,
+			"encryption_key": identity.EncryptionPublicKey,
+			"ciphertext":     ciphertext,
+		},
+	}, nil
+
 }

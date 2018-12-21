@@ -74,27 +74,6 @@ load 'test_helper/bats-file/load'
     [ "$type" = "user" ]
 }
 
-@test "create trusted user" {
-  account_key="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
-  user="$(vault write -format=json nkey/identities/trusted-user type=user trusted_keys=$account_key | jq .data)"
-  trusted_keys="$(echo $user | jq -r '.trusted_keys[]' | tr -d '"')"
-  type="$(echo $user | jq -r .type)"
-    [ "$type" = "user" ]
-    [ "$trusted_keys" = "$account_key" ]
-}
-
-@test "create ngs user claim" {
-  issuer="$(vault read -format=json nkey/identities/ngs-account | jq -r .data.public_key)"
-  subject="$(vault read -format=json nkey/identities/ngs-user | jq -r .data.public_key)"
-  token="$(vault write -format=json nkey/identities/ngs-account/sign-claim subject=$subject type="user" claims=@user.json | jq -r .data.token)"
-  response="$(vault write -format=json nkey/identities/ngs-user/verify-claim token=$token | jq .data)"
-  response_issuer="$(echo $response | jq -r .issuer)"
-  response_subject="$(echo $response | jq -r .public_key)"
-    [ "$issuer" = "$response_issuer" ]
-    [ "$subject" = "$response_subject" ]
-}
-
-
 @test "export ngs user creds" {
   subject="$(vault read -format=json nkey/identities/ngs-user | jq -r .data.public_key)"
   token="$(vault write -format=json nkey/identities/ngs-account/sign-claim subject=$subject type="user" claims=@user.json | jq -r .data.token)"

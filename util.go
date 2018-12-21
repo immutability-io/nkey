@@ -15,7 +15,9 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +25,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/btcsuite/btcd/btcec"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/hashicorp/vault/helper/pgpkeys"
 	"github.com/nats-io/jwt"
 	"github.com/nats-io/nkeys"
@@ -35,6 +40,8 @@ const (
 	JWTBoundary string = "NATS USER JWT"
 	// SeedBoundary is an empty string
 	SeedBoundary string = "USER NKEY SEED"
+	// EncryptionBoundary is an empty string
+	EncryptionBoundary string = "ENCRYPTION KEY"
 	// BoundaryFormat is a printf string
 	BoundaryFormat string = "-----%s %s-----\n"
 	// Begin is the begin boundary
@@ -92,7 +99,7 @@ func dedup(stringSlice []string) []string {
 	return returnSlice
 }
 
-func encodeClaim(claimsType, claimsData, subject string, keyPair nkeys.KeyPair) (string, error) {
+func encodeClaim(claimsType, claimsData, subject, name string, keyPair nkeys.KeyPair) (string, error) {
 	var claims jwt.Claims
 	switch claimsType {
 	case "account":
@@ -120,6 +127,9 @@ func encodeClaim(claimsType, claimsData, subject string, keyPair nkeys.KeyPair) 
 	}
 	if subject != "" {
 		claims.Claims().Subject = subject
+	}
+	if name != "" {
+		claims.Claims().Name = name
 	}
 	token, err := claims.Encode(keyPair)
 	if err != nil {
@@ -253,13 +263,69 @@ func keybaseEncrypt(keybaseIdentity string, payload []byte) (string, []byte, err
 	return formatFingerprint(fingerprints[0]), ciphertextes[0], nil
 }
 
-func getCredsFile(seed, token string) []byte {
+func getCredsFile(seed, token, privateKey string) []byte {
 	contents := fmt.Sprintf(BoundaryFormat, Begin, JWTBoundary) +
 		fmt.Sprintf("%s\n", token) +
 		fmt.Sprintf(BoundaryFormat, End, JWTBoundary) +
 		fmt.Sprintf(BoundaryFormat, Begin, SeedBoundary) +
 		fmt.Sprintf("%s\n", seed) +
-		fmt.Sprintf(BoundaryFormat, End, SeedBoundary)
+		fmt.Sprintf(BoundaryFormat, End, SeedBoundary) +
+		fmt.Sprintf(BoundaryFormat, Begin, EncryptionBoundary) +
+		fmt.Sprintf("%s\n", privateKey) +
+		fmt.Sprintf(BoundaryFormat, End, EncryptionBoundary)
 	return []byte(contents)
+}
 
+func zeroKey(k *ecdsa.PrivateKey) {
+	b := k.D.Bits()
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+func createEncryptionKey() string {
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		return Empty
+	}
+	defer zeroKey(privateKey)
+	privateKeyBytes := crypto.FromECDSA(privateKey)
+	privateKeyString := hexutil.Encode(privateKeyBytes)[2:]
+
+	return privateKeyString
+}
+
+func encrypt(publicKeyString, plaintext string) (string, error) {
+	publicKeyBytes, err := hex.DecodeString(publicKeyString)
+	if err != nil {
+		return Empty, err
+	}
+
+	pubKey, err := btcec.ParsePubKey(publicKeyBytes, btcec.S256())
+	if err != nil {
+		return Empty, err
+	}
+
+	// Encrypt a message decryptable by the private key corresponding to pubKey
+	ciphertextBytes, err := btcec.Encrypt(pubKey, []byte(plaintext))
+	if err != nil {
+		return Empty, err
+	}
+	ciphertext := hex.EncodeToString(ciphertextBytes)
+	return ciphertext, nil
+}
+
+func decrypt(privateKeyString, ciphertext string) (string, error) {
+	// Decode the hex-encoded private key.
+	pkBytes, err := hex.DecodeString(privateKeyString)
+	if err != nil {
+		return Empty, err
+	}
+	// note that we already have corresponding pubKey
+	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), pkBytes)
+	ciphertextBytes, err := hex.DecodeString(ciphertext)
+	// Try decrypting and verify if it's the same message.
+	plaintextBytes, err := btcec.Decrypt(privKey, ciphertextBytes)
+	plaintext := string(plaintextBytes)
+	return plaintext, nil
 }

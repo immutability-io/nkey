@@ -79,10 +79,11 @@ func (b *backend) pathImportCreate(ctx context.Context, req *logical.Request, da
 				return nil, err
 			}
 			pair, err := nkeys.FromSeed(seed)
+			defer pair.Wipe()
 			if err != nil {
 				return nil, err
 			}
-			identity, err = b.storeIdentity(ctx, req, name, pair, nil)
+			identity, err = b.storeIdentity(ctx, req, name, pair, createEncryptionKey(), nil)
 			if err != nil {
 				return nil, err
 			}
@@ -100,7 +101,7 @@ func (b *backend) pathImportCreate(ctx context.Context, req *logical.Request, da
 			if err != nil {
 				return nil, err
 			}
-			identity, err = b.storeIdentity(ctx, req, name, pair, nil)
+			identity, err = b.storeIdentity(ctx, req, name, pair, createEncryptionKey(), nil)
 			if err != nil {
 				return nil, err
 			}

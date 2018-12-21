@@ -55,7 +55,7 @@ func namesPaths(b *backend) []*framework.Path {
 			},
 		},
 		&framework.Path{
-			Pattern:      "names/" + framework.GenericNameRegex("name") + "/verify-claim",
+			Pattern:      "names/" + framework.GenericNameRegex("name") + "/verify",
 			HelpSynopsis: "Verify that data was signed by a particular public key.",
 			HelpDescription: `
 
@@ -94,6 +94,25 @@ Verifies and validates a JWT token
 			ExistenceCheck: b.pathExistenceCheck,
 			Callbacks: map[logical.Operation]framework.OperationFunc{
 				logical.UpdateOperation: b.pathVerifyClaim,
+			},
+		},
+		&framework.Path{
+			Pattern:      "names/" + framework.GenericNameRegex("name") + "/encrypt",
+			HelpSynopsis: "Encrypts data.",
+			HelpDescription: `
+
+Encrypts data.
+`,
+			Fields: map[string]*framework.FieldSchema{
+				"name": &framework.FieldSchema{Type: framework.TypeString},
+				"plaintext": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "The data to encrypt",
+				},
+			},
+			ExistenceCheck: b.pathExistenceCheck,
+			Callbacks: map[logical.Operation]framework.OperationFunc{
+				logical.UpdateOperation: b.pathEncrypt,
 			},
 		},
 	}
